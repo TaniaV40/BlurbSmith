@@ -1,0 +1,1 @@
+{"name":"BlurbSmith","description":"A SaaS web application designed for authors to generate Amazon best-seller style book descriptions using Gemini, and export them to Google Docs.","requestFramePermissions":[],"majorCapabilities":["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]}
