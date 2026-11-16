@@ -1,90 +1,44 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { 
   Sparkles, 
-  LogIn, 
   CheckCircle2, 
   Copy, 
-  FileText, 
+  Download, 
+  Code2,
   RefreshCw, 
   Loader2, 
-  ExternalLink, 
-  X, 
-  ShieldCheck, 
-  Check, 
   Zap, 
   ArrowRight,
   BookOpen
 } from 'lucide-react';
 import Markdown from 'react-markdown';
-import { initAuth, googleSignIn, logout, getAccessToken } from './auth';
-import { exportToGoogleDoc } from './api';
-import type { User } from 'firebase/auth';
+import { downloadFormattedDoc, markdownToKdpHtml } from './api';
 import { TmaHeader } from './components/TmaHeader';
 import { TmaNavyCard } from './components/TmaNavyCard';
 
+function stripEmDashes(text: string): string {
+  return text
+    .replace(/\s*[\u2014\u2013]\s*/g, ', ')
+    .replace(/([^\n-])\s*--\s*([^\n-])/g, '$1, $2')
+    .replace(/,\s*,/g, ',')
+    .replace(/,\s*([.!?])/g, '$1');
+}
+
 export default function App() {
-  const [needsAuth, setNeedsAuth] = useState(true);
-  const [user, setUser] = useState<User | null>(null);
-  const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
-  const [isExporting, setIsExporting] = useState(false);
   
   const [title, setTitle] = useState('');
   const [premise, setPremise] = useState('');
   const [reference, setReference] = useState('');
   const [generatedBlurb, setGeneratedBlurb] = useState('');
 
-  // UI Modals & Toast State
-  const [exportResult, setExportResult] = useState<{ docId: string; docUrl: string } | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
-  const [showAuthModal, setShowAuthModal] = useState(false);
-
-  useEffect(() => {
-    const unsubscribe = initAuth(
-      (user) => {
-        setUser(user);
-        setNeedsAuth(false);
-      },
-      () => {
-        setUser(null);
-        setNeedsAuth(true);
-      }
-    );
-    return () => {
-      if (unsubscribe) unsubscribe();
-    };
-  }, []);
 
   const triggerToast = (msg: string) => {
     setToastMessage(msg);
     setTimeout(() => {
       setToastMessage((prev) => (prev === msg ? null : prev));
     }, 3000);
-  };
-
-  const handleLogin = async () => {
-    setIsLoggingIn(true);
-    try {
-      const result = await googleSignIn();
-      if (result) {
-        setUser(result.user);
-        setNeedsAuth(false);
-        setShowAuthModal(false);
-        triggerToast('Google Drive connected successfully!');
-      }
-    } catch (err: any) {
-      console.error('Login failed:', err);
-      alert(err.message || 'Login failed. Please check popup permissions.');
-    } finally {
-      setIsLoggingIn(false);
-    }
-  };
-
-  const handleLogout = async () => {
-    await logout();
-    setUser(null);
-    setNeedsAuth(true);
-    triggerToast('Disconnected from Google Drive.');
   };
 
   const handleReset = () => {
@@ -116,7 +70,7 @@ export default function App() {
       }
       
       const data = await res.json();
-      setGeneratedBlurb(data.text);
+      setGeneratedBlurb(stripEmDashes(data.text || ''));
       triggerToast('Blurb generated successfully!');
     } catch (err: any) {
       console.error(err);
@@ -132,40 +86,20 @@ export default function App() {
     triggerToast('Copied blurb to clipboard!');
   };
 
-  const handleExport = async () => {
-    if (needsAuth) {
-      setShowAuthModal(true);
-      return;
-    }
-    
-    if (!generatedBlurb) {
-      alert("Please generate a blurb before exporting.");
-      return;
-    }
-
-    setIsExporting(true);
-    try {
-      const token = await getAccessToken();
-      if (!token) {
-        setShowAuthModal(true);
-        throw new Error("No Google Drive access token available.");
-      }
-      
-      const result = await exportToGoogleDoc(token, title || 'Untitled Book', generatedBlurb);
-      setExportResult(result);
-      window.open(result.docUrl, '_blank', 'noopener,noreferrer');
-    } catch (err: any) {
-      console.error("Export error:", err);
-      alert(err.message || "Failed to export to Google Docs. Please try connecting Google Drive again.");
-    } finally {
-      setIsExporting(false);
-    }
+  const handleCopyKdpHtml = () => {
+    if (!generatedBlurb) return;
+    const kdpHtml = markdownToKdpHtml(generatedBlurb);
+    navigator.clipboard.writeText(kdpHtml);
+    triggerToast('Copied Amazon KDP HTML to clipboard!');
   };
 
-  const copyDocLink = () => {
-    if (!exportResult?.docUrl) return;
-    navigator.clipboard.writeText(exportResult.docUrl);
-    triggerToast('Google Doc URL copied to clipboard!');
+  const handleDownloadDoc = () => {
+    if (!generatedBlurb) {
+      alert("Please generate a blurb before downloading.");
+      return;
+    }
+    const filename = downloadFormattedDoc(title || 'Untitled Book', generatedBlurb);
+    triggerToast(`Downloaded "${filename}" (opens in Word & Google Docs)!`);
   };
 
   return (
@@ -177,11 +111,6 @@ export default function App() {
         appFunction="AMAZON BEST-SELLER COPYWRITING ENGINE"
         badgeText="FOR AUTHORS"
         logoSrc="/Modern_Author_logo.png"
-        isDriveConnected={!needsAuth}
-        userDisplayName={user?.displayName || undefined}
-        userPhotoURL={user?.photoURL || undefined}
-        onConnectDrive={needsAuth ? handleLogin : undefined}
-        onDisconnectDrive={!needsAuth ? handleLogout : undefined}
         onReset={handleReset}
       />
 
@@ -190,110 +119,6 @@ export default function App() {
         <div className="fixed top-24 right-6 z-50 flex items-center gap-3 bg-[#1c3447] text-white px-5 py-3 rounded-xl border border-[#C9A66B] shadow-2xl animate-in fade-in duration-200">
           <CheckCircle2 className="w-5 h-5 text-[#2A7B4C] shrink-0" />
           <span className="text-sm font-semibold">{toastMessage}</span>
-        </div>
-      )}
-
-      {/* Auth Prompt Modal */}
-      {showAuthModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#132432]/80 backdrop-blur-md">
-          <div className="bg-[#1c3447] border-2 border-[#C9A66B] rounded-2xl p-6 sm:p-8 max-w-md w-full shadow-2xl relative space-y-6 text-white">
-            <button 
-              onClick={() => setShowAuthModal(false)}
-              className="absolute top-4 right-4 text-[#E2D7C7]/60 hover:text-white transition-colors p-1"
-            >
-              <X className="w-5 h-5" />
-            </button>
-
-            <div className="flex items-center gap-3">
-              <div className="w-12 h-12 rounded-xl bg-[#C9A66B]/15 border border-[#C9A66B]/40 flex items-center justify-center text-[#C9A66B]">
-                <FileText className="w-6 h-6" />
-              </div>
-              <div>
-                <h3 className="font-playfair text-xl font-bold text-white">Connect Google Drive</h3>
-                <p className="text-xs text-[#E2D7C7]/70">Required to export blurbs to Google Docs</p>
-              </div>
-            </div>
-
-            <div className="space-y-3 bg-[#132432] p-4 rounded-xl border border-[#C9A66B]/20 text-xs text-[#E2D7C7]/90">
-              <div className="flex items-start gap-2">
-                <ShieldCheck className="w-4 h-4 text-[#2A7B4C] shrink-0 mt-0.5" />
-                <span>Uses official Google OAuth2 (<code className="text-[#C9A66B]">drive.file</code> scope).</span>
-              </div>
-              <div className="flex items-start gap-2">
-                <Check className="w-4 h-4 text-[#2A7B4C] shrink-0 mt-0.5" />
-                <span>BlurbSmith only accesses files it creates in your Google Drive.</span>
-              </div>
-            </div>
-
-            <button
-              onClick={handleLogin}
-              disabled={isLoggingIn}
-              className="btn-primary-gold w-full py-3.5"
-            >
-              {isLoggingIn ? (
-                <>
-                  <Loader2 className="w-5 h-5 animate-spin mr-2" />
-                  Connecting...
-                </>
-              ) : (
-                <>
-                  <LogIn className="w-5 h-5 mr-2" />
-                  Authorize & Export to Google Docs
-                </>
-              )}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Export Success Modal */}
-      {exportResult && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#132432]/80 backdrop-blur-md animate-in fade-in duration-200">
-          <div className="bg-[#1c3447] border-2 border-[#C9A66B] rounded-2xl p-6 sm:p-8 max-w-lg w-full shadow-2xl relative space-y-6 text-white">
-            <button 
-              onClick={() => setExportResult(null)}
-              className="absolute top-4 right-4 text-[#E2D7C7]/60 hover:text-white transition-colors p-1"
-            >
-              <X className="w-5 h-5" />
-            </button>
-
-            <div className="flex items-center gap-4">
-              <div className="w-14 h-14 rounded-2xl bg-[#2A7B4C]/20 border border-[#2A7B4C]/50 flex items-center justify-center text-[#6EE7B7]">
-                <CheckCircle2 className="w-8 h-8" />
-              </div>
-              <div>
-                <span className="text-xs font-bold uppercase tracking-wider text-[#C9A66B]">Export Complete</span>
-                <h3 className="font-playfair text-2xl font-bold text-white">Google Doc Created!</h3>
-              </div>
-            </div>
-
-            <div className="bg-[#132432] border border-[#C9A66B]/30 p-4 rounded-xl space-y-1">
-              <div className="text-xs text-[#E2D7C7]/70">Document Title</div>
-              <div className="font-bold text-[#C9A66B] text-base truncate">
-                Book Blurb - {title || 'Untitled Book'}
-              </div>
-            </div>
-
-            <div className="flex flex-col sm:flex-row items-center gap-3 pt-2">
-              <a 
-                href={exportResult.docUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="btn-primary-gold w-full sm:flex-1 py-3"
-              >
-                <span>Open Google Doc</span>
-                <ExternalLink className="w-4 h-4 ml-2" />
-              </a>
-
-              <button
-                onClick={copyDocLink}
-                className="w-full sm:w-auto flex items-center justify-center gap-2 bg-[#132432] hover:bg-[#132432]/80 text-white font-bold py-3 px-4 rounded-full border border-[#C9A66B]/40 transition-all text-xs"
-              >
-                <Copy className="w-4 h-4 text-[#C9A66B]" />
-                <span>Copy Link</span>
-              </button>
-            </div>
-          </div>
         </div>
       )}
 
@@ -310,7 +135,7 @@ export default function App() {
             Craft High-Converting Book Descriptions
           </h1>
           <p className="text-sm sm:text-base text-[#1c3447]/80 leading-relaxed font-medium max-w-2xl mx-auto">
-            Analyze bestseller structures, generate punchy copy tailored to your story, and export formatted blurbs directly to Google Docs.
+            Analyze bestseller structures, generate punchy copy tailored to your story, and export formatted blurbs for Word, Google Docs, or Amazon KDP.
           </p>
         </div>
 
@@ -416,7 +241,7 @@ export default function App() {
                     </div>
                     
                     {/* Control Toolbar */}
-                    <div className="pt-3 flex flex-wrap items-center gap-3 border-t border-[#C9A66B]/20 mt-2">
+                    <div className="pt-3 flex flex-wrap items-center gap-2.5 border-t border-[#C9A66B]/20 mt-2">
                       <button 
                         onClick={handleCopy}
                         className="flex items-center gap-2 px-4 py-2.5 bg-[#132432] hover:bg-[#132432]/80 text-white text-xs font-bold rounded-full border border-[#C9A66B]/40 transition-all active:scale-[0.98]"
@@ -424,14 +249,21 @@ export default function App() {
                         <Copy className="w-4 h-4 text-[#C9A66B]" />
                         <span>Copy Text</span>
                       </button>
+
+                      <button 
+                        onClick={handleCopyKdpHtml}
+                        className="flex items-center gap-2 px-4 py-2.5 bg-[#132432] hover:bg-[#132432]/80 text-white text-xs font-bold rounded-full border border-[#C9A66B]/40 transition-all active:scale-[0.98]"
+                      >
+                        <Code2 className="w-4 h-4 text-[#C9A66B]" />
+                        <span>Copy KDP HTML</span>
+                      </button>
                       
                       <button 
-                        onClick={handleExport}
-                        disabled={isExporting}
-                        className="flex items-center gap-2 px-4 py-2.5 bg-[#2A7B4C]/30 text-[#6EE7B7] hover:bg-[#2A7B4C]/50 border border-[#2A7B4C] text-xs font-bold rounded-full transition-all active:scale-[0.98] disabled:opacity-50"
+                        onClick={handleDownloadDoc}
+                        className="flex items-center gap-2 px-4 py-2.5 bg-[#2A7B4C]/30 text-[#6EE7B7] hover:bg-[#2A7B4C]/50 border border-[#2A7B4C] text-xs font-bold rounded-full transition-all active:scale-[0.98]"
                       >
-                        {isExporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileText className="w-4 h-4" />}
-                        <span>Export to Google Doc</span>
+                        <Download className="w-4 h-4" />
+                        <span>Download Doc (.doc)</span>
                       </button>
 
                       <div className="flex-1"></div>
@@ -460,7 +292,7 @@ export default function App() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-4">
           <div className="text-xs text-[#E2D7C7]/90 flex items-center gap-3">
             <span className="gold-pill-badge py-1 px-3 text-[10px]">TMA PRO SUITE</span>
-            <span>Upgrade to Pro ($9.99/mo) for 50 generations and automatic Google Drive syncing.</span>
+            <span>Upgrade to Pro ($9.99/mo) for 50 generations and instant formatted exports.</span>
           </div>
           <button className="btn-primary-gold text-xs py-2 px-5">
             <span>Explore Pro Plan</span>
