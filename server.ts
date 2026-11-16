@@ -7,7 +7,27 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+function formatApiError(error: any, fallbackMessage: string): { status: number; message: string } {
+  const rawMessage = typeof error?.message === "string" ? error.message.trim() : "";
+  if (rawMessage.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(rawMessage);
+      const apiErr = parsed?.error || parsed;
+      const code = typeof apiErr?.code === "number" ? apiErr.code : 500;
+      const msg = apiErr?.message || fallbackMessage;
+      if (code === 403) {
+        return {
+          status: 403,
+          message: `Gemini API permission denied (${msg}). Please verify GEMINI_API_KEY in your environment settings and ensure the Generative Language API is enabled.`,
+        };
+      }
+      return { status: code >= 400 && code < 600 ? code : 500, message: msg };
+    } catch {
+      // Fall through if not valid JSON
+    }
+  }
+  return { status: 500, message: rawMessage || fallbackMessage };
+}
 
 function parseMarkdownForGoogleDocs(title: string, markdown: string) {
   const requests: any[] = [];
@@ -155,6 +175,14 @@ Instructions:
 
 Do not include any intro/outro conversational text, just the generated blurb.`;
 
+      const apiKey = process.env.GEMINI_API_KEY?.trim();
+      if (!apiKey) {
+        return res.status(500).json({
+          error: "Server configuration error: GEMINI_API_KEY is not set in the environment variables.",
+        });
+      }
+
+      const ai = new GoogleGenAI({ apiKey });
       const response = await ai.models.generateContent({
         model: 'gemini-3.6-flash',
         contents: prompt,
@@ -163,7 +191,8 @@ Do not include any intro/outro conversational text, just the generated blurb.`;
       res.json({ text: response.text });
     } catch (error: any) {
       console.error("Generation error:", error);
-      res.status(500).json({ error: error.message || "Failed to generate blurb" });
+      const { status, message } = formatApiError(error, "Failed to generate blurb");
+      res.status(status).json({ error: message });
     }
   });
 
